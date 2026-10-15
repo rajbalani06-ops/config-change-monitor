@@ -1,0 +1,17 @@
+watchdog==4.0.2
+PyYAML==6.0.2
+python-dotenv==1.0.1
+pydantic==2.9.2
+pydantic-settings==2.6.1
+pika==1.3.2
+psycopg[binary]==3.2.3
+redis==5.2.0
+prometheus-client==0.21.1
+httpx==0.27.2
+opentelemetry-api==1.28.2
+opentelemetry-sdk==1.28.2
+opentelemetry-exporter-otlp-proto-http==1.28.2
+opentelemetry-instrumentation==0.49b2
+structlog==24.4.0
+tenacity==9.0.0
+python-json-logger==2.0.7

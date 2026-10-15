@@ -1,0 +1,150 @@
+services:
+  postgres:
+    image: postgres:16.4-alpine
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-ccm}
+      POSTGRES_USER: ${POSTGRES_USER:-ccm}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-change-me-postgres}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./docker/postgres/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ccm -d ccm"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    expose:
+      - "5432"
+    networks: [ccm]
+    restart: unless-stopped
+
+  rabbitmq:
+    image: rabbitmq:3.13.7-management-alpine
+    environment:
+      RABBITMQ_DEFAULT_USER: ${RABBITMQ_USER:-ccm}
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASSWORD:-change-me-rabbit}
+    expose:
+      - "5672"
+      - "15672"
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    networks: [ccm]
+    restart: unless-stopped
+
+  redis:
+    image: redis:7.4.1-alpine
+    command: ["redis-server", "--save", "", "--appendonly", "no"]
+    expose:
+      - "6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    networks: [ccm]
+    restart: unless-stopped
+
+  mock-webhook:
+    build: ./mock-webhook
+    expose:
+      - "8088"
+    environment:
+      PORT: "8088"
+    networks: [ccm]
+    restart: unless-stopped
+
+  api:
+    build: ./php-api
+    ports:
+      - "8080:8080"
+    environment:
+      DATABASE_URL: ${DATABASE_URL:-postgresql://ccm:change-me-postgres@postgres:5432/ccm}
+      POSTGRES_USER: ${POSTGRES_USER:-ccm}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-change-me-postgres}
+      RABBITMQ_HOST: ${RABBITMQ_HOST:-rabbitmq}
+      RABBITMQ_PORT: ${RABBITMQ_PORT:-5672}
+      RABBITMQ_MANAGEMENT_PORT: ${RABBITMQ_MANAGEMENT_PORT:-15672}
+      RABBITMQ_USER: ${RABBITMQ_USER:-ccm}
+      RABBITMQ_PASSWORD: ${RABBITMQ_PASSWORD:-change-me-rabbit}
+      WATCH_ALLOWLIST: ${WATCH_ALLOWLIST:-/watched}
+      API_KEYS: ${API_KEYS:-dev-admin-key:admin:default,dev-tenant-a:operator:tenant-a,dev-tenant-b:operator:tenant-b}
+      ALLOW_LOCAL_DEV_AUTH: ${ALLOW_LOCAL_DEV_AUTH:-false}
+    volumes:
+      - ./watched:/watched
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks: [ccm]
+    restart: unless-stopped
+
+  api-test:
+    profiles: [test]
+    build:
+      context: ./php-api
+      dockerfile: Dockerfile.test
+    networks: [ccm]
+
+  worker:
+    build: ./python-worker
+    environment:
+      CCM_ROLE: all
+      DATABASE_URL: ${DATABASE_URL:-postgresql://ccm:change-me-postgres@postgres:5432/ccm}
+      RABBITMQ_HOST: ${RABBITMQ_HOST:-rabbitmq}
+      RABBITMQ_USER: ${RABBITMQ_USER:-ccm}
+      RABBITMQ_PASSWORD: ${RABBITMQ_PASSWORD:-change-me-rabbit}
+      REDIS_ENABLED: ${REDIS_ENABLED:-true}
+      REDIS_HOST: ${REDIS_HOST:-redis}
+      WATCH_ALLOWLIST: ${WATCH_ALLOWLIST:-/watched}
+      DEFAULT_TENANT_ID: ${DEFAULT_TENANT_ID:-default}
+      DEFAULT_WEBHOOK_URL: ${DEFAULT_WEBHOOK_URL:-http://mock-webhook:8088/}
+      WEBHOOK_ALLOW_PRIVATE_NETWORKS: "true"
+      EMIT_INITIAL_SNAPSHOT_EVENTS: ${EMIT_INITIAL_SNAPSHOT_EVENTS:-false}
+      DEBOUNCE_MS: ${DEBOUNCE_MS:-400}
+      STABLE_FILE_MS: ${STABLE_FILE_MS:-250}
+      POLL_FALLBACK_SECONDS: ${POLL_FALLBACK_SECONDS:-5}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      OTEL_ENABLED: ${OTEL_ENABLED:-false}
+    volumes:
+      - ./watched:/watched
+    depends_on:
+      postgres:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      mock-webhook:
+        condition: service_started
+    networks: [ccm]
+    restart: unless-stopped
+
+  worker-test:
+    profiles: [test]
+    build:
+      context: ./python-worker
+      dockerfile: Dockerfile.test
+    networks: [ccm]
+
+  prometheus:
+    image: prom/prometheus:v2.55.1
+    volumes:
+      - ./docker/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+    expose:
+      - "9090"
+    ports:
+      - "9090:9090"
+    depends_on:
+      - worker
+      - api
+    networks: [ccm]
+    restart: unless-stopped
+
+networks:
+  ccm:
+    driver: bridge
+
+volumes:
+  postgres_data:

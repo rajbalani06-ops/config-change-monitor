@@ -1,0 +1,79 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"/>
+  <title>Config Change Monitor</title>
+  <style>
+    :root { font-family: Segoe UI, sans-serif; color: #0f172a; }
+    body { margin: 1.5rem; background: #f8fafc; }
+    h1 { font-size: 1.4rem; }
+    section { background: #fff; padding: 1rem; margin-bottom: 1rem; border-radius: 8px; box-shadow: 0 1px 2px #0001; }
+    table { width: 100%; border-collapse: collapse; font-size: 0.9rem; }
+    th, td { text-align: left; padding: 0.4rem; border-bottom: 1px solid #e2e8f0; vertical-align: top; }
+    input { padding: 0.4rem; margin-right: 0.4rem; }
+    button { padding: 0.4rem 0.7rem; }
+    pre { white-space: pre-wrap; background: #0f172a; color: #e2e8f0; padding: 0.75rem; border-radius: 6px; }
+    .err { color: #b91c1c; }
+  </style>
+</head>
+<body>
+  <h1>Configuration Change Monitor</h1>
+  <section>
+    <label>API key <input id="key" type="password" placeholder="dev-admin-key"/></label>
+    <label>Tenant <input id="tenant" placeholder="default"/></label>
+    <button onclick="refresh()">Refresh</button>
+    <span id="status"></span>
+  </section>
+  <section>
+    <h2>Monitored files</h2>
+    <div id="files"></div>
+  </section>
+  <section>
+    <h2>Recent events</h2>
+    <div id="events"></div>
+  </section>
+  <section>
+    <h2>Deliveries / dead letters</h2>
+    <div id="ops"></div>
+  </section>
+  <script>
+    const api = (p) => fetch(p, { headers: {
+      'X-API-Key': document.getElementById('key').value,
+      'X-Tenant-Id': document.getElementById('tenant').value
+    }});
+    async function refresh() {
+      const status = document.getElementById('status');
+      try {
+        const h = await (await api('/health')).json();
+        status.textContent = 'health: ' + h.status;
+        const files = await (await api('/files')).json();
+        document.getElementById('files').innerHTML = table(files.data || [], ['id','display_name','last_scan_at','last_error','last_operation']);
+        const events = await (await api('/events?limit=20')).json();
+        document.getElementById('events').innerHTML = (events.data||[]).map(e => {
+          const btn = `<button onclick="replay('${e.id}')">Replay</button>`;
+          return `<div><strong>${e.operation}</strong> ${e.id} ${e.delivery_status||''} ${btn}<pre>${esc(JSON.stringify(e.payload || e, null, 2))}</pre></div>`;
+        }).join('') || 'none';
+        const d = await (await api('/deliveries?limit=20')).json();
+        const dl = await (await api('/dead-letters')).json();
+        document.getElementById('ops').innerHTML =
+          '<h3>Attempts</h3>' + table(d.data||[], ['event_id','status','http_status','attempt','error','created_at']) +
+          '<h3>Dead letters</h3>' + table(dl.data||[], ['event_id','reason','created_at']);
+      } catch (e) { status.innerHTML = '<span class="err">'+e+'</span>'; }
+    }
+    async function replay(id) {
+      const res = await fetch('/events/'+id+'/replay', { method:'POST', headers: {
+        'X-API-Key': document.getElementById('key').value,
+        'X-Tenant-Id': document.getElementById('tenant').value
+      }});
+      alert('replay status '+res.status);
+      refresh();
+    }
+    function table(rows, cols) {
+      if (!rows.length) return 'none';
+      return '<table><tr>'+cols.map(c=>'<th>'+c+'</th>').join('')+'</tr>' +
+        rows.map(r=>'<tr>'+cols.map(c=>'<td>'+esc(r[c])+'</td>').join('')+'</tr>').join('') + '</table>';
+    }
+    function esc(v) { return String(v ?? '').replace(/[&<>]/g, s => ({'&':'&amp;','<':'&lt;','>':'&gt;'}[s])); }
+  </script>
+</body>
+</html>

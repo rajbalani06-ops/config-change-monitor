@@ -1,0 +1,71 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ccm-worker
+  namespace: ccm
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: ccm-worker
+  template:
+    metadata:
+      labels:
+        app: ccm-worker
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+      containers:
+        - name: worker
+          image: ccm-worker:local
+          env:
+            - name: CCM_ROLE
+              value: all
+            - name: RABBITMQ_HOST
+              value: rabbitmq
+            - name: REDIS_HOST
+              value: redis
+          envFrom:
+            - configMapRef:
+                name: ccm-config
+            - secretRef:
+                name: ccm-secrets
+          ports:
+            - containerPort: 9100
+          readinessProbe:
+            httpGet:
+              path: /
+              port: 9100
+            initialDelaySeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /
+              port: 9100
+            initialDelaySeconds: 20
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: "1"
+              memory: 512Mi
+          volumeMounts:
+            - name: watched
+              mountPath: /watched
+              readOnly: true
+      volumes:
+        - name: watched
+          persistentVolumeClaim:
+            claimName: ccm-watched
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: ccm-watched
+  namespace: ccm
+spec:
+  accessModes: ["ReadWriteMany"]
+  resources:
+    requests:
+      storage: 1Gi

@@ -1,0 +1,8 @@
+FROM config-change-monitor-worker:latest
+
+USER root
+COPY requirements.txt requirements-dev.txt /tmp/
+RUN pip install --no-cache-dir -r /tmp/requirements-dev.txt
+COPY src /app/src
+COPY tests /app/tests
+CMD ["python", "-m", "pytest", "tests"]

@@ -1,0 +1,8 @@
+.git
+**/__pycache__
+**/.pytest_cache
+**/.venv
+**/vendor
+**/.phpunit.cache
+README.md
+k8s
